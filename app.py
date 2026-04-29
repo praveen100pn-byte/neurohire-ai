@@ -1,4 +1,6 @@
 import os
+os.environ["TRANSFORMERS_NO_TORCHVISION"] = "1"
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import streamlit as st
@@ -11,7 +13,7 @@ import datetime
 from io import BytesIO
 from reportlab.pdfgen import canvas
 
-# ---------------- APP CONFIG ---------------- #
+# ---------------- APP ---------------- #
 st.set_page_config(page_title="NeuroHire AI", layout="wide")
 
 # ---------------- DATABASE ---------------- #
@@ -39,7 +41,7 @@ def load_model():
 
 model = load_model()
 
-# ---------------- TEXT PROCESSING ---------------- #
+# ---------------- TEXT ---------------- #
 def extract_text(file):
     reader = PyPDF2.PdfReader(file)
     return " ".join([p.extract_text() or "" for p in reader.pages]).lower()
@@ -48,8 +50,8 @@ def extract_experience(text):
     exp = re.findall(r'(\d+)\+?\s*(years|yrs)', text)
     return max([int(x[0]) for x in exp]) if exp else 0
 
-# ---------------- AI ENGINE ---------------- #
-def analyze_resume(text, jd, skills):
+# ---------------- AI CORE ---------------- #
+def analyze(text, jd, skills):
     jd_emb = model.encode(jd, convert_to_tensor=True)
     text_emb = model.encode(text, convert_to_tensor=True)
 
@@ -69,17 +71,28 @@ def analyze_resume(text, jd, skills):
 
     return score, matched, missing
 
-# ---------------- TIER SYSTEM ---------------- #
-def get_tier(score):
+# ---------------- LOGIC ---------------- #
+def tier(score):
     return "🟢 Strong Fit" if score > 75 else "🟡 Moderate" if score > 50 else "🔴 Weak"
 
-# ---------------- DECISION ENGINE ---------------- #
-def get_decision(score, exp):
+def decision(score, exp):
     if score > 80 and exp >= 3:
         return "🟢 HIRE"
     elif score > 60:
         return "🟡 MAYBE"
     return "🔴 REJECT"
+
+def improve(missing, exp):
+    tips = []
+
+    if missing:
+        tips.append("Add skills: " + ", ".join(missing))
+    if exp < 2:
+        tips.append("Gain real project experience")
+    tips.append("Add measurable achievements")
+    tips.append("Include GitHub / portfolio")
+
+    return tips
 
 # ---------------- CHATBOT ---------------- #
 def chatbot(query, df):
@@ -92,50 +105,18 @@ def chatbot(query, df):
         return df[['Candidate', 'Score', 'Decision']].to_string()
 
     if "why" in query.lower():
-        return f"{top['Candidate']} is selected due to highest semantic match and experience weight."
+        return f"{top['Candidate']} selected due to highest semantic match + experience weight."
 
     return "Ask: best / compare / why"
 
-# ---------------- IMPROVEMENT ENGINE ---------------- #
-def improve(missing, exp):
-    tips = []
-
-    if missing:
-        tips.append(f"Add skills: {', '.join(missing)}")
-
-    if exp < 2:
-        tips.append("Gain real project experience")
-
-    tips.append("Add measurable achievements")
-    tips.append("Improve project descriptions")
-    tips.append("Include GitHub / portfolio")
-
-    return tips
-
-# ---------------- PDF REPORT ---------------- #
-def generate_pdf(data):
-    buffer = BytesIO()
-    p = canvas.Canvas(buffer)
-
-    p.drawString(100, 800, "NeuroHire AI Final Report")
-
-    y = 760
-    for d in data:
-        p.drawString(100, y, f"{d['Candidate']} | {d['Score']} | {d['Decision']}")
-        y -= 20
-
-    p.save()
-    buffer.seek(0)
-    return buffer
-
 # ---------------- UI ---------------- #
-st.title("NeuroHire AI — Final System")
+st.title("NeuroHire AI — Final Stable System")
 
 col1, col2 = st.columns(2)
 
 with col1:
     jd = st.text_area("Job Description")
-    skills_input = st.text_input("Required Skills", "Python, AI, SQL")
+    skills_input = st.text_input("Skills", "Python, AI, SQL")
 
 with col2:
     files = st.file_uploader("Upload Resumes", type=["pdf"], accept_multiple_files=True)
@@ -151,25 +132,25 @@ if st.button("Analyze"):
     for f in files:
         text = extract_text(f)
 
-        score, matched, missing = analyze_resume(text, jd, skills)
+        score, matched, missing = analyze(text, jd, skills)
         exp = extract_experience(text)
 
         final_score = score + len(matched)*3 + exp*2
 
-        tier = get_tier(final_score)
-        decision = get_decision(final_score, exp)
+        t = tier(final_score)
+        d = decision(final_score, exp)
 
         results.append({
             "Candidate": f.name,
             "Score": round(final_score, 2),
-            "Tier": tier,
-            "Decision": decision
+            "Tier": t,
+            "Decision": d
         })
 
         cursor.execute("""
         INSERT INTO results (user, candidate, score, tier, decision, timestamp)
         VALUES (?, ?, ?, ?, ?, ?)
-        """, ("user", f.name, final_score, tier, decision,
+        """, ("user", f.name, final_score, t, d,
               str(datetime.datetime.now())))
         conn.commit()
 
@@ -180,21 +161,15 @@ if st.button("Analyze"):
 
     st.bar_chart(df.set_index("Candidate")["Score"])
 
-    # CHATBOT
     if chat:
         st.info(chatbot(chat, df))
 
-    # IMPROVEMENT
-    st.subheader("Resume Improvement")
+    st.subheader("Improvement Suggestions")
     for r in results:
         st.write(f"### {r['Candidate']}")
-        for t in improve([], 2):
-            st.write("•", t)
-
-    # PDF
-    pdf = generate_pdf(results)
-    st.download_button("Download Report", pdf, "neurohire_final.pdf")
+        for tip in improve([], 2):
+            st.write("•", tip)
 
 # ---------------- HISTORY ---------------- #
 st.subheader("History")
-st.write("Stored in local database (Streamlit Cloud compatible)")
+st.write("Stored results saved in database")
