@@ -2,7 +2,4 @@ streamlit
 PyPDF2
 pandas
 reportlab
-torch==2.2.2
-sentence-transformers==2.2.2
-transformers==4.36.2
-huggingface-hub==0.20.3
+requests
