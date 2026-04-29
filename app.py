@@ -1,175 +1,143 @@
-import os
-os.environ["TRANSFORMERS_NO_TORCHVISION"] = "1"
-os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 import streamlit as st
 import PyPDF2
-from sentence_transformers import SentenceTransformer, util
 import pandas as pd
 import re
-import sqlite3
-import datetime
-from io import BytesIO
-from reportlab.pdfgen import canvas
+import requests
 
 # ---------------- APP ---------------- #
 st.set_page_config(page_title="NeuroHire AI", layout="wide")
 
-# ---------------- DATABASE ---------------- #
-db_path = os.path.join(os.getcwd(), "neurohire.db")
-conn = sqlite3.connect(db_path, check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user TEXT,
-    candidate TEXT,
-    score REAL,
-    tier TEXT,
-    decision TEXT,
-    timestamp TEXT
-)
-""")
-conn.commit()
-
-# ---------------- MODEL ---------------- #
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-model = load_model()
-
-# ---------------- TEXT ---------------- #
+# ---------------- PDF ---------------- #
 def extract_text(file):
     reader = PyPDF2.PdfReader(file)
     return " ".join([p.extract_text() or "" for p in reader.pages]).lower()
 
+# ---------------- EXPERIENCE ---------------- #
 def extract_experience(text):
     exp = re.findall(r'(\d+)\+?\s*(years|yrs)', text)
     return max([int(x[0]) for x in exp]) if exp else 0
 
-# ---------------- AI CORE ---------------- #
-def analyze(text, jd, skills):
-    jd_emb = model.encode(jd, convert_to_tensor=True)
-    text_emb = model.encode(text, convert_to_tensor=True)
+# ---------------- SMART SEMANTIC SCORE (NO ML DEPENDENCY) ---------------- #
+def semantic_score(jd, text):
+    jd_words = set(jd.lower().split())
+    text_words = set(text.lower().split())
 
-    score = util.cos_sim(jd_emb, text_emb).item() * 100
+    if not jd_words or not text_words:
+        return 0
 
+    overlap = jd_words.intersection(text_words)
+    return len(overlap) / len(jd_words.union(text_words))
+
+# ---------------- SKILL ANALYSIS ---------------- #
+def skill_analysis(text, skills):
     matched = []
     missing = []
 
     for s in skills:
-        s_emb = model.encode(s, convert_to_tensor=True)
-        sim = util.cos_sim(text_emb, s_emb).item()
-
-        if sim > 0.35:
+        if s in text:
             matched.append(s)
         else:
             missing.append(s)
 
-    return score, matched, missing
+    return matched, missing
 
-# ---------------- LOGIC ---------------- #
-def tier(score):
-    return "🟢 Strong Fit" if score > 75 else "🟡 Moderate" if score > 50 else "🔴 Weak"
+# ---------------- TIER SYSTEM ---------------- #
+def get_tier(score):
+    if score > 75:
+        return "🟢 Strong (Hire)"
+    elif score > 50:
+        return "🟡 Medium (May be)"
+    else:
+        return "🔴 Weak (Reject)"
 
-def decision(score, exp):
-    if score > 80 and exp >= 3:
-        return "🟢 HIRE"
-    elif score > 60:
-        return "🟡 MAYBE"
-    return "🔴 REJECT"
+# ---------------- AI EXPLANATION ---------------- #
+def explain(matched, missing, exp):
+    reasons = []
 
-def improve(missing, exp):
-    tips = []
+    if matched:
+        reasons.append("Strong skill match: " + ", ".join(matched[:3]))
 
     if missing:
-        tips.append("Add skills: " + ", ".join(missing))
-    if exp < 2:
-        tips.append("Gain real project experience")
-    tips.append("Add measurable achievements")
-    tips.append("Include GitHub / portfolio")
+        reasons.append("Missing skills: " + ", ".join(missing[:3]))
 
-    return tips
+    if exp >= 3:
+        reasons.append("Good experience level")
+    elif exp == 0:
+        reasons.append("No clear experience found")
 
-# ---------------- CHATBOT ---------------- #
-def chatbot(query, df):
-    top = df.iloc[0]
-
-    if "best" in query.lower():
-        return f"Best Candidate: {top['Candidate']} ({top['Score']})"
-
-    if "compare" in query.lower():
-        return df[['Candidate', 'Score', 'Decision']].to_string()
-
-    if "why" in query.lower():
-        return f"{top['Candidate']} selected due to highest semantic match + experience weight."
-
-    return "Ask: best / compare / why"
+    return reasons
 
 # ---------------- UI ---------------- #
-st.title("NeuroHire AI — Final Stable System")
+st.title("NeuroHire AI — Advanced Recruitment System")
 
 col1, col2 = st.columns(2)
 
 with col1:
     jd = st.text_area("Job Description")
-    skills_input = st.text_input("Skills", "Python, AI, SQL")
+    skills_input = st.text_input("Required Skills", "Python, AI, SQL, ML")
 
 with col2:
-    files = st.file_uploader("Upload Resumes", type=["pdf"], accept_multiple_files=True)
-
-chat = st.text_input("AI Assistant")
+    files = st.file_uploader("Upload Resumes (PDF)", type=["pdf"], accept_multiple_files=True)
 
 # ---------------- RUN ---------------- #
-if st.button("Analyze"):
+if st.button("Analyze Candidates"):
 
-    skills = [s.strip().lower() for s in skills_input.split(",")]
-    results = []
+    if jd and files and skills_input:
 
-    for f in files:
-        text = extract_text(f)
+        skills = [s.strip().lower() for s in skills_input.split(",")]
+        results = []
+        explanations = {}
 
-        score, matched, missing = analyze(text, jd, skills)
-        exp = extract_experience(text)
+        for f in files:
+            text = extract_text(f)
 
-        final_score = score + len(matched)*3 + exp*2
+            base_score = semantic_score(jd, text) * 100
 
-        t = tier(final_score)
-        d = decision(final_score, exp)
+            matched, missing = skill_analysis(text, skills)
+            exp = extract_experience(text)
 
-        results.append({
-            "Candidate": f.name,
-            "Score": round(final_score, 2),
-            "Tier": t,
-            "Decision": d
-        })
+            final_score = base_score + len(matched)*6 + exp*2
 
-        cursor.execute("""
-        INSERT INTO results (user, candidate, score, tier, decision, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, ("user", f.name, final_score, t, d,
-              str(datetime.datetime.now())))
-        conn.commit()
+            tier = get_tier(final_score)
 
-    df = pd.DataFrame(results).sort_values(by="Score", ascending=False)
+            explanations[f.name] = explain(matched, missing, exp)
 
-    st.subheader("Ranking")
-    st.dataframe(df)
+            results.append({
+                "Candidate": f.name,
+                "Score": round(final_score, 2),
+                "Experience": exp,
+                "Tier": tier,
+                "Matched Skills": ", ".join(matched),
+                "Missing Skills": ", ".join(missing)
+            })
 
-    st.bar_chart(df.set_index("Candidate")["Score"])
+        df = pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
-    if chat:
-        st.info(chatbot(chat, df))
+        # ---------------- OUTPUT ---------------- #
+        st.subheader("🫡 Candidate Ranking")
+        st.dataframe(df, use_container_width=True)
 
-    st.subheader("Improvement Suggestions")
-    for r in results:
-        st.write(f"### {r['Candidate']}")
-        for tip in improve([], 2):
-            st.write("•", tip)
+        st.subheader("📊 Score Distribution")
+        st.bar_chart(df.set_index("Candidate")["Score"])
 
-# ---------------- HISTORY ---------------- #
-st.subheader("History")
-st.write("Stored results saved in database")
+        # ---------------- TOP CANDIDATE ---------------- #
+        top = df.iloc[0]
+        st.success(f"Top Candidate: {top['Candidate']} | {top['Tier']} | Score {top['Score']}")
+
+        # ---------------- AI EXPLANATION ---------------- #
+        st.subheader("🧠 AI Explanation")
+        for name, reasons in explanations.items():
+            st.write(f"### {name}")
+            for r in reasons:
+                st.write("•", r)
+
+        # ---------------- DOWNLOAD ---------------- #
+        st.download_button(
+            "Download Report",
+            df.to_csv(index=False),
+            "neurohire_report.csv",
+            "text/csv"
+        )
+
+    else:
+        st.error("Please fill all fields and upload resumes")
