@@ -1,0 +1,5 @@
+streamlit
+PyPDF2
+sentence-transformers==2.2.2
+pandas
+torch
