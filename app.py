@@ -2,12 +2,15 @@ import streamlit as st
 import PyPDF2
 import pandas as pd
 import re
-import requests
 
 # ---------------- APP ---------------- #
 st.set_page_config(page_title="NeuroHire AI", layout="wide")
 
-# ---------------- PDF ---------------- #
+# ---------------- CLEAN TEXT ---------------- #
+def clean(text):
+    return re.sub(r'[^a-zA-Z0-9 ]', ' ', text.lower())
+
+# ---------------- PDF TEXT ---------------- #
 def extract_text(file):
     reader = PyPDF2.PdfReader(file)
     return " ".join([p.extract_text() or "" for p in reader.pages]).lower()
@@ -17,19 +20,23 @@ def extract_experience(text):
     exp = re.findall(r'(\d+)\+?\s*(years|yrs)', text)
     return max([int(x[0]) for x in exp]) if exp else 0
 
-# ---------------- SMART SEMANTIC SCORE (NO ML DEPENDENCY) ---------------- #
-def semantic_score(jd, text):
-    jd_words = set(jd.lower().split())
-    text_words = set(text.lower().split())
+# ---------------- SIMILARITY SCORE ---------------- #
+def similarity_score(jd, text):
+    jd = clean(jd)
+    text = clean(text)
 
-    if not jd_words or not text_words:
+    jd_words = set(jd.split())
+    text_words = set(text.split())
+
+    if not jd_words:
         return 0
 
-    overlap = jd_words.intersection(text_words)
-    return len(overlap) / len(jd_words.union(text_words))
+    common = jd_words.intersection(text_words)
+    return (len(common) / len(jd_words)) * 100
 
-# ---------------- SKILL ANALYSIS ---------------- #
+# ---------------- SKILL MATCHING ---------------- #
 def skill_analysis(text, skills):
+    text = clean(text)
     matched = []
     missing = []
 
@@ -50,57 +57,37 @@ def get_tier(score):
     else:
         return "🔴 Weak (Reject)"
 
-# ---------------- AI EXPLANATION ---------------- #
-def explain(matched, missing, exp):
-    reasons = []
-
-    if matched:
-        reasons.append("Strong skill match: " + ", ".join(matched[:3]))
-
-    if missing:
-        reasons.append("Missing skills: " + ", ".join(missing[:3]))
-
-    if exp >= 3:
-        reasons.append("Good experience level")
-    elif exp == 0:
-        reasons.append("No clear experience found")
-
-    return reasons
-
 # ---------------- UI ---------------- #
-st.title("NeuroHire AI — Advanced Recruitment System")
+st.title("NeuroHire AI — ATS System (Final Version)")
 
 col1, col2 = st.columns(2)
 
 with col1:
     jd = st.text_area("Job Description")
-    skills_input = st.text_input("Required Skills", "Python, AI, SQL, ML")
+    skills_input = st.text_input("Required Skills", "Python, Machine Learning, SQL, Data Structures")
 
 with col2:
     files = st.file_uploader("Upload Resumes (PDF)", type=["pdf"], accept_multiple_files=True)
 
-# ---------------- RUN ---------------- #
+# ---------------- ANALYSIS ---------------- #
 if st.button("Analyze Candidates"):
 
     if jd and files and skills_input:
 
         skills = [s.strip().lower() for s in skills_input.split(",")]
         results = []
-        explanations = {}
 
         for f in files:
             text = extract_text(f)
 
-            base_score = semantic_score(jd, text) * 100
+            base_score = similarity_score(jd, text)
 
             matched, missing = skill_analysis(text, skills)
             exp = extract_experience(text)
 
-            final_score = base_score + len(matched)*6 + exp*2
+            final_score = base_score + len(matched) * 5 + exp * 2
 
             tier = get_tier(final_score)
-
-            explanations[f.name] = explain(matched, missing, exp)
 
             results.append({
                 "Candidate": f.name,
@@ -114,22 +101,15 @@ if st.button("Analyze Candidates"):
         df = pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
         # ---------------- OUTPUT ---------------- #
-        st.subheader("🫡 Candidate Ranking")
-        st.dataframe(df, use_container_width=True)
+        st.subheader("🏆 Candidate Ranking")
+        st.dataframe(df, width="stretch")
 
-        st.subheader("📊 Score Distribution")
+        st.subheader("📊 Score Chart")
         st.bar_chart(df.set_index("Candidate")["Score"])
 
         # ---------------- TOP CANDIDATE ---------------- #
         top = df.iloc[0]
         st.success(f"Top Candidate: {top['Candidate']} | {top['Tier']} | Score {top['Score']}")
-
-        # ---------------- AI EXPLANATION ---------------- #
-        st.subheader("🧠 AI Explanation")
-        for name, reasons in explanations.items():
-            st.write(f"### {name}")
-            for r in reasons:
-                st.write("•", r)
 
         # ---------------- DOWNLOAD ---------------- #
         st.download_button(
