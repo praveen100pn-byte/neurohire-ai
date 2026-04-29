@@ -1,6 +1,7 @@
 streamlit
 PyPDF2
-sentence-transformers
+sentence-transformers==2.2.2
 pandas
-torch>=2.2.0
+torch==2.2.2
+transformers==4.36.2
 reportlab
