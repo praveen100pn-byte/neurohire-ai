@@ -1,6 +1,6 @@
 {
   "name": "NeuroHire AI Dev Environment",
-  
+
   "image": "mcr.microsoft.com/devcontainers/python:1-3.10-bookworm",
 
   "customizations": {
@@ -12,7 +12,8 @@
     },
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.analysis.typeCheckingMode": "basic"
       },
       "extensions": [
         "ms-python.python",
@@ -21,9 +22,9 @@
     }
   },
 
-  "updateContentCommand": "sudo apt update && sudo apt upgrade -y && pip install --upgrade pip && pip install -r requirements.txt",
+  "updateContentCommand": "python -m pip install --upgrade pip && pip install -r requirements.txt",
 
-  "postAttachCommand": "streamlit run app.py --server.enableCORS false --server.enableXsrfProtection false --server.port 8501",
+  "postAttachCommand": "streamlit run app.py --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false",
 
   "portsAttributes": {
     "8501": {
