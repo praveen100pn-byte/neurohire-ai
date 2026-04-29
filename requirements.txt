@@ -2,4 +2,7 @@ streamlit
 PyPDF2
 sentence-transformers
 pandas
-torch>=2.2.0
+torch
+torchvision
+transformers
+huggingface-hub
