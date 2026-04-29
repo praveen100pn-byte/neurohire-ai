@@ -5,3 +5,4 @@ reportlab
 torch==2.2.2
 sentence-transformers==2.2.2
 transformers==4.36.2
+huggingface-hub==0.16.4
