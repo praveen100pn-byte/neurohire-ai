@@ -18,13 +18,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-ELIGIBILITY_REGISTRY = [
-    "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "PHP", "Go", "Golang",
-    "Rust", "Swift", "Kotlin", "Ruby", "Dart", "R", "SQL", "HTML", "CSS", "MATLAB",
-    "Scala", "Perl", "Haskell", "Lua", "Julia", "Cobol", "Fortran", "Pascal", 
-    "Objective-C", "Shell", "Bash", "PowerShell", "Solidity", "VHDL", "Verilog",
-    "C", "Assembly", "Groovy", "Elixir", "Erlang", "Clojure", "F#", "Visual Basic",
-    "VB.NET", "SAS", "Apex", "Delphi", "Lisp", "Ada", "Tcl", "Scheme"
+GLOBAL_REGISTRY = [
+    "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "PHP", "Go", "Rust", 
+    "Swift", "Kotlin", "Ruby", "SQL", "HTML", "CSS", "R", "MATLAB", "Scala", "Assembly"
 ]
 
 def extract_text(file):
@@ -37,10 +33,7 @@ def extract_text(file):
         file.seek(0)
         try:
             images = convert_from_bytes(file.read())
-            ocr_text = ""
-            for img in images:
-                ocr_text += pytesseract.image_to_string(img)
-            return ocr_text.lower()
+            return "".join([pytesseract.image_to_string(img) for img in images]).lower()
         except:
             return ""
     return text.lower()
@@ -48,25 +41,22 @@ def extract_text(file):
 def clean_text(text):
     return re.sub(r'[^a-z0-9+#\s]', ' ', text.lower())
 
-def analyze_match(jd, resume_text, user_skills):
-    detected_in_jd = [lang for lang in ELIGIBILITY_REGISTRY if re.search(r'\b' + re.escape(lang.lower()) + r'\b', jd.lower())]
-    full_requirements = list(set([s.strip().lower() for s in user_skills] + [l.lower() for l in detected_in_jd]))
+def analyze_match(jd, resume_text, manual_skills):
+    detected_in_jd = [lang for lang in GLOBAL_REGISTRY if re.search(r'\b' + re.escape(lang.lower()) + r'\b', jd.lower())]
+    core_requirements = list(set([s.strip().lower() for s in manual_skills if s.strip()] + [l.lower() for l in detected_in_jd]))
     
-    jd_words = set(clean_text(jd).split())
-    res_words = set(clean_text(resume_text).split())
-    jd_words = {w for w in jd_words if len(w) > 2}
-    keyword_score = (len(jd_words.intersection(res_words)) / len(jd_words)) * 100 if jd_words else 0
+    jd_tokens = set(clean_text(jd).split())
+    res_tokens = set(clean_text(resume_text).split())
+    match_tokens = jd_tokens.intersection(res_tokens)
+    keyword_score = (len(match_tokens) / len(jd_tokens)) * 100 if jd_tokens else 0
 
-    matched = []
-    for s in full_requirements:
-        if re.search(r'\b' + re.escape(s) + r'\b', resume_text):
-            matched.append(s.upper())
-            
-    missing = [s.upper() for s in full_requirements if s.upper() not in matched]
-    exp_find = re.findall(r'(\d+)\+?\s*(years|yrs|experience)', resume_text)
-    exp_val = max([int(x[0]) for x in exp_find]) if exp_find else 0
-    final_score = (keyword_score * 0.3) + (len(matched)/max(len(full_requirements), 1) * 60) + (min(exp_val, 10) * 1)
-    return round(final_score, 2), matched, missing, exp_val
+    verified = [s.upper() for s in core_requirements if re.search(r'\b' + re.escape(s) + r'\b', resume_text)]
+    missing = [s.upper() for s in core_requirements if s.upper() not in verified]
+    
+    skill_match_ratio = len(verified) / max(len(core_requirements), 1)
+    final_score = (keyword_score * 0.2) + (skill_match_ratio * 80)
+    
+    return round(final_score, 2), verified, missing
 
 st.markdown('<div class="main-header">HIREIQ</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">AI Resume Screening System</div>', unsafe_allow_html=True)
@@ -75,43 +65,43 @@ col_l, col_r = st.columns(2)
 with col_l:
     st.subheader("System Specification")
     jd_box = st.text_area("Technical Specification", height=200)
-    manual_skills = st.text_input("Mandatory Constraints", "Docker, AWS, Kubernetes")
+    manual_spec = st.text_input("Mandatory Constraints", "Python, SQL")
 with col_r:
     st.subheader("Data Input")
     files = st.file_uploader("Source Assets (PDF)", type=["pdf"], accept_multiple_files=True)
 
 if st.button("EXECUTE ANALYSIS"):
     if jd_box and files:
-        skill_list = [s.strip() for s in manual_skills.split(",") if s.strip()]
-        final_data = []
+        req_list = [s.strip() for s in manual_spec.split(",") if s.strip()]
+        results = []
         for f in files:
             raw = extract_text(f)
-            score, matched, missing, exp = analyze_match(jd_box, raw, skill_list)
-            if score >= 80:
-                status, color = "OPTIMAL COMPATIBILITY", "🟢"
-            elif score >= 50:
+            score, verified, missing = analyze_match(jd_box, raw, req_list)
+            
+            if score >= 70:
+                status, color = "WELCOME", "🟢"
+            elif score >= 40:
                 status, color = "PROVISIONAL STATUS", "🟡"
             else:
                 status, color = "NON-COMPLIANT", "🔴"
-            final_data.append({
-                "Candidate": f.name,
+                
+            results.append({
+                "Identity": f.name,
                 "Neural Score": score,
-                "Tenure": f"{exp} YRS",
                 "Compliance": f"{color} {status}",
-                "Verified Tech": ", ".join(matched),
+                "Verified Tech": ", ".join(verified),
                 "Missing Nodes": ", ".join(missing)
             })
-        df = pd.DataFrame(final_data).sort_values("Neural Score", ascending=False).reset_index(drop=True)
-        df.insert(0, "Rank", range(1, len(df) + 1))
+            
+        df = pd.DataFrame(results).sort_values("Neural Score", ascending=False).reset_index(drop=True)
+        df.insert(0, "Rank", df.apply(lambda x: df.index[df['Neural Score'] == x['Neural Score']][0] + 1 if x['Neural Score'] >= 40 else "-", axis=1))
+
         st.markdown("---")
         st.subheader("Intelligence Output")
         st.dataframe(df, use_container_width=True, hide_index=True)
-        st.subheader("Performance Metrics Visualization")
-        st.bar_chart(df.set_index("Candidate")["Neural Score"])
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("EXPORT SYSTEM REPORT", data=csv, file_name="HireIQ_Report.csv", mime="text/csv")
+        st.bar_chart(df.set_index("Identity")["Neural Score"])
     else:
-        st.error("System Error: Required data missing")
+        st.error("Protocol Error: Requirements missing")
 
 st.markdown("---")
 st.markdown("<p style='text-align: right; font-family: Orbitron; font-size: 10px; color: #444;'>STATUS: OPERATIONAL | PR AV</p>", unsafe_allow_html=True)
