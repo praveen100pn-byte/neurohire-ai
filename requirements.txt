@@ -1,9 +1,8 @@
 streamlit
 PyPDF2
 pandas
-reportlab
-requests
 pytesseract
 pdf2image
 Pillow
+
 
