@@ -84,13 +84,16 @@ if st.button("EXECUTE ANALYSIS"):
                 status, color = "PROVISIONAL STATUS", "🟡"
             else:
                 status, color = "NON-COMPLIANT", "🔴"
+            
+            # Logic for Missing Nodes display
+            missing_display = ", ".join(missing) if missing else "-"
                 
             results.append({
                 "Identity": f.name,
                 "Neural Score": score,
                 "Compliance": f"{color} {status}",
                 "Verified Tech": ", ".join(verified),
-                "Missing Nodes": ", ".join(missing)
+                "Missing Nodes": missing_display
             })
             
         df = pd.DataFrame(results).sort_values("Neural Score", ascending=False).reset_index(drop=True)
