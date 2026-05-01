@@ -14,7 +14,8 @@ st.markdown("""
     .stApp { background-color: #0e1117; }
     .main-header { font-family: 'Orbitron', sans-serif; color: #00d4ff; text-align: center; font-size: 2.5rem; letter-spacing: 4px; }
     .sub-header { font-family: 'Inter', sans-serif; color: #8b949e; text-align: center; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 40px; }
-    .stButton>button { width: 100%; background-color: #00d4ff; color: #0e1117; font-weight: 700; border: none; border-radius: 4px; }
+    .stButton>button { width: 100%; background-color: #00d4ff; color: #0e1117; font-weight: 700; border: none; border-radius: 4px; transition: 0.3s; }
+    .stButton>button:hover { box-shadow: 0 0 15px #00d4ff; transform: scale(1.01); }
     </style>
     """, unsafe_allow_html=True)
 
@@ -42,14 +43,20 @@ def clean_text(text):
     return re.sub(r'[^a-z0-9+#\s]', ' ', text.lower())
 
 def analyze_match(jd, resume_text, manual_skills):
+    # Detect constraints only from JD and User Input
     detected_in_jd = [lang for lang in GLOBAL_REGISTRY if re.search(r'\b' + re.escape(lang.lower()) + r'\b', jd.lower())]
     core_requirements = list(set([s.strip().lower() for s in manual_skills if s.strip()] + [l.lower() for l in detected_in_jd]))
     
-    jd_tokens = set(clean_text(jd).split())
-    res_tokens = set(clean_text(resume_text).split())
-    match_tokens = jd_tokens.intersection(res_tokens)
-    keyword_score = (len(match_tokens) / len(jd_tokens)) * 100 if jd_tokens else 0
+    # Stability Layer: Sorted tokens to prevent score flickering
+    jd_tokens = sorted(list(set(clean_text(jd).strip().split())))
+    res_tokens = sorted(list(set(clean_text(resume_text).strip().split())))
+    jd_set = {t for t in jd_tokens if len(t) > 2}
+    res_set = set(res_tokens)
+    
+    match_tokens = jd_set.intersection(res_set)
+    keyword_score = (len(match_tokens) / len(jd_set)) * 100 if jd_set else 0
 
+    # Strict Requirement Verification
     verified = [s.upper() for s in core_requirements if re.search(r'\b' + re.escape(s) + r'\b', resume_text)]
     missing = [s.upper() for s in core_requirements if s.upper() not in verified]
     
@@ -64,8 +71,8 @@ st.markdown('<div class="sub-header">AI Resume Screening System</div>', unsafe_a
 col_l, col_r = st.columns(2)
 with col_l:
     st.subheader("System Specification")
-    jd_box = st.text_area("Technical Specification", height=200)
-    manual_spec = st.text_input("Mandatory Constraints", "Python, SQL")
+    jd_box = st.text_area("Technical Specification", height=200, placeholder="Define project requirements...")
+    manual_spec = st.text_input("Mandatory Constraints", placeholder="e.g. Python, SQL, Docker")
 with col_r:
     st.subheader("Data Input")
     files = st.file_uploader("Source Assets (PDF)", type=["pdf"], accept_multiple_files=True)
@@ -85,7 +92,6 @@ if st.button("EXECUTE ANALYSIS"):
             else:
                 status, color = "NON-COMPLIANT", "🔴"
             
-            # Logic for Missing Nodes display
             missing_display = ", ".join(missing) if missing else "-"
                 
             results.append({
@@ -97,14 +103,20 @@ if st.button("EXECUTE ANALYSIS"):
             })
             
         df = pd.DataFrame(results).sort_values("Neural Score", ascending=False).reset_index(drop=True)
+        
+        # Rank logic: Only assign numbers to qualified candidates (>=40)
         df.insert(0, "Rank", df.apply(lambda x: df.index[df['Neural Score'] == x['Neural Score']][0] + 1 if x['Neural Score'] >= 40 else "-", axis=1))
 
         st.markdown("---")
         st.subheader("Intelligence Output")
         st.dataframe(df, use_container_width=True, hide_index=True)
+        st.subheader("Neural Distribution")
         st.bar_chart(df.set_index("Identity")["Neural Score"])
+        
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("EXPORT SYSTEM REPORT", data=csv, file_name="HireIQ_Analytics.csv", mime="text/csv")
     else:
-        st.error("Protocol Error: Requirements missing")
+        st.error("Protocol Error: Input fields require data for processing.")
 
 st.markdown("---")
-st.markdown("<p style='text-align: right; font-family: Orbitron; font-size: 10px; color: #444;'>STATUS: OPERATIONAL | PR AV</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: right; font-family: Orbitron; font-size: 10px; color: #444;'>ENGINE STATUS: OPERATIONAL | PR AV</p>", unsafe_allow_html=True)
